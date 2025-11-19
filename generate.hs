@@ -165,7 +165,7 @@ renderAnimationThread ∷ FilePath → (FrameState → BSB.Builder) → FrameSta
 renderAnimationThread outDir mkFrame fs = do
   CM.forM_ [fs.framesFrom .. fs.framesTo] $ \n' → do
     renderFrame outDir mkFrame fs { n = n' }
-    CM.when ((n' `mod` logEveryNFrame) == 0 || n' == fs.framesTotal) $
+    CM.when ((n' `mod` logEveryNFrame) == 0 || n' == fs.framesTo) $
       putStrLn $ unwords
         [ "Thread #" <> show fs.threadN, show (fs.framesFrom, fs.framesTo) <> ":"
         , "Thread frame", show (n' - fs.framesFrom)
