@@ -2,7 +2,8 @@
 set -o errexit || exit; set -o errtrace; set -o nounset; set -o pipefail
 
 # Guard dependencies
->/dev/null type dirname mktemp rm du cut time ghc runhaskell ffmpeg mpv xdg-open
+>/dev/null type dirname mktemp rm du cut tail time nproc
+>/dev/null type ghc runhaskell ffmpeg mpv xdg-open
 
 SCRIPT_DIR=$(dirname -- "${BASH_SOURCE[0]}")
 cd -- "$SCRIPT_DIR"
@@ -22,11 +23,14 @@ FRAME_FILE_PATTERN=$TMP_DIR/frame-%09d.ppm
 # shellcheck disable=SC2059
 FIRST_FRAME_FILE=$(printf "$FRAME_FILE_PATTERN" 0)
 
-ANIMATION=xordev-shader-179-version
-WIDTH=600
-HEIGHT=600
-FPS=60
-TOTAL_SECONDS=60
+CORES=$(nproc --all)
+
+: "${ANIMATION=modified-xordev-shader}"
+: "${WIDTH:=600}"
+: "${HEIGHT=600}"
+: "${FPS:=60}"
+: "${DURATION:=10}" # In seconds
+: "${THREADS:=$CORES}"
 
 MODE=
 if (( $# == 0 )) || ( (( $# == 1 )) && [[ $1 == video ]] ); then
@@ -41,29 +45,37 @@ fi
 
 (
 	set -o xtrace
-	ghc ./generate.hs -odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
+	ghc ./generate.hs -O2 -threaded -rtsopts -with-rtsopts=-N \
+		-odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
 )
 
 case $MODE in
 	picture)
 		(
 			set -o xtrace
-			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" 1 1
+			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" 1 1 "$THREADS"
 			xdg-open "$FIRST_FRAME_FILE"
 		)
 		;;
 	video)
 		(
 			set -o xtrace
-			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" "$FPS" "$TOTAL_SECONDS"
+			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" "$FPS" "$DURATION" "$THREADS"
 		)
 		echo -n 'Raw frames size: '
 		du -ch "$TMP_DIR"/*.ppm | tail -n1 | cut -d $'\t' -f 1 | cut -d ' ' -f 1
-		ANIMATION_FILE_PATH=${ANIMATION}-w-${WIDTH}-h-${HEIGHT}-fps-${FPS}-dur-${TOTAL_SECONDS}.mp4
+		ANIMATION_FILE_PATH=${ANIMATION}-w-${WIDTH}-h-${HEIGHT}-fps-${FPS}-dur-${DURATION}.mp4
 		(
+			FFMPEG_CMD=(
+				ffmpeg
+				-framerate "$FPS"
+				-i "$FRAME_FILE_PATTERN"
+				-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p
+				"$ANIMATION_FILE_PATH"
+			)
 			set -o xtrace
+			"${FFMPEG_CMD[@]}"
 			cleanup
-			ffmpeg -i "$FRAME_FILE_PATTERN" -r "$FPS" "$ANIMATION_FILE_PATH"
 			mpv -- "$ANIMATION_FILE_PATH"
 		)
 		;;

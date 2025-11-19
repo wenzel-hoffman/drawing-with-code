@@ -1,5 +1,5 @@
 #! /usr/bin/env runhaskell
-{-# OPTIONS_GHC -Wall -Wno-ambiguous-fields -O3 #-}
+{-# OPTIONS_GHC -Wall -Wno-ambiguous-fields -threaded #-}
 {-# LANGUAGE UnicodeSyntax #-}
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE LambdaCase #-}
@@ -11,42 +11,58 @@ import qualified System.IO as SysIO
 import Text.Printf (printf)
 import qualified Data.ByteString.Builder as BSB
 import Data.Word (Word8)
-import Control.Monad (forM_, when)
-import Data.List (foldl', find)
+import qualified Control.Monad as CM
+import qualified Data.List as List
 import Text.Read (readEither)
+import qualified Control.Concurrent.MVar as MVar
+import Control.Concurrent (forkIO)
 
 main ∷ IO ()
 main = do
-  (outDir, animationF, w', h', fps', seconds') ←
+  (outDir, animationF, w', h', fps', seconds', threads') ←
     SysEnv.getArgs >>= \case
-      [outDir, animation, w', h', fps', seconds'] → do
+      [outDir, animation, w', h', fps', seconds', threads'] → do
         animationF ← do
-          case find (\(x, _) → x == animation) animations of
+          case List.find (\(x, _) → x == animation) animations of
             Nothing → argsFailure $ "Unrecognized animation: " <> animation
             Just (_, f) → pure f
         w'' ← parseWord "WIDTH" w'
         h'' ← parseWord "HEIGHT" h'
         fps'' ← parseWord "FPS" fps'
         seconds'' ← parseWord "SECONDS" seconds'
-        pure (outDir, animationF, w'', h'', fps'', seconds'')
+        threads'' ← parseWord "THREADS" threads'
+        pure (outDir, animationF, w'', h'', fps'', seconds'', threads'')
       args → argsFailure $ "Unexpected arguments: " <> show args
 
+  let framesTotal' = fps' * seconds'
 
-  renderAnimation outDir animationF FrameState
-    { w = w'
-    , h = h'
+  locks ←
+    let frameRanges = splitRange (0, pred framesTotal') threads' in
+    CM.forM (zip [1..] frameRanges) $ \(threadN', (framesFrom', framesTo')) → do
+      lock <- MVar.newEmptyMVar @()
+      (lock <$) . forkIO $ do
+        renderAnimationThread outDir animationF FrameState
+          { w = w'
+          , h = h'
 
-    , fps = fps'
-    , seconds = seconds'
-    , framesTotal = fps' * seconds'
+          , fps = fps'
+          , seconds = seconds'
+          , framesTotal = framesTotal'
+          , framesFrom = framesFrom'
+          , framesTo = framesTo'
 
-    , x = minBound
-    , y = minBound
+          , threads = threads'
+          , threadN = threadN'
 
-    , n = minBound
-    }
+          , x = minBound
+          , y = minBound
 
-  putStrLn "[OK]"
+          , n = minBound
+          }
+        MVar.putMVar lock ()
+
+  CM.forM_ locks MVar.takeMVar
+  putStrLn $ "[OK] All " <> show threads' <> " thread(s) are done"
 
   where
     parseWord placeholder
@@ -56,16 +72,17 @@ main = do
     argsFailure errMsg =
       fail $ unlines
         [ "\n\n" <> errMsg <> "\n"
-        , "Usage: ./generate.hs OUTPUT_DIR ANIMATION WIDTH HEIGHT FPS SECONDS\n"
-        , "Usage example: ./generate.hs /tmp/foo xordev-shader-179-version 600 600 60 10\n"
+        , "Usage: ./generate.hs OUTPUT_DIR ANIMATION WIDTH HEIGHT FPS SECONDS THREADS\n"
+        , "Usage example: ./generate.hs /tmp/foo xordev-shader-179-version 600 600 60 10 4\n"
         , "All available ANIMATIONs:"
         , foldMap (\(x, _) → "  - " <> x <> "\n") animations
         ]
 
 animations ∷ [(String, FrameState → BSB.Builder)]
 animations =
-  [ ("xordev-shader-179-version", mkFancyShaderFrame179chars)
-  , ("xordev-shader-195-version", mkFancyShaderFrame195chars)
+  [ ("modified-xordev-shader", mkModifiedXorDevShaderFrame)
+  , ("xordev-shader-179-version", mkXorDevShaderFrame179chars)
+  , ("xordev-shader-195-version", mkXorDevShaderFrame195chars)
   , ("chess-board", mkChessBoardFrame)
   ]
 
@@ -76,19 +93,37 @@ mkChessBoardFrame fs =
     then rgb (255,255,255)
     else rgb (0,0,0)
 
--- See https://x.com/XorDev/status/1894123951401378051
-mkFancyShaderFrame195chars ∷ FrameState → BSB.Builder
-mkFancyShaderFrame195chars fs =
-  rgb' pixel
+-- See https://twigl.app?ol=true&ss=-OeSzOONLcUV0fcPofxQ
+mkModifiedXorDevShaderFrame ∷ FrameState → BSB.Builder
+mkModifiedXorDevShaderFrame fs =
+  vecToRgb pixel
   where
-    rgb' (v4 ∷ Vec4) =
-      rgb (floor (v4.x * 255), floor (v4.y * 255), floor (v4.z * 255))
+    g = mkGlsl fs
+    p ∷ Vec2 = (g.fc * zoomOut * 2 - g.r * zoomOut) / vec g.r.y
+    l ∷ Vec2 = 4.0 - 4.0 * abs (0.7 - vec (len2 p))
+    v ∷ Vec2 = p * l
 
-    r = Vec2 (fromIntegral fs.w) (fromIntegral fs.h)
-    fc = Vec2 (fromIntegral fs.x) (fromIntegral (fs.h - 1 - fs.y))
-    t ∷ Float = fromIntegral fs.n / 60
+    zoomOut ∷ Vec2 = 1.6
 
-    p ∷ Vec2 = (fc * 2 - r) / vec r.y
+    pixel =
+      let
+        reducer (o', v') iy =
+          let
+            oN = o' + (sin (Vec4 w.x w.y w.y w.x) + 3) * (vec . abs) (w.x - w.y)
+            w = v' + cos (Vec2 v'.y v'.x * vec iy + Vec2 0 iy + vec g.t) / vec iy + 5
+          in
+            (oN, w)
+        o = fst $ List.foldl' reducer (vec 0, v) [1..8]
+      in
+        tanh (9 * exp (vec l.x - 3 - vec p.y * Vec4 (-3) 0 3 0) / o)
+
+-- See https://x.com/XorDev/status/1894123951401378051
+mkXorDevShaderFrame195chars ∷ FrameState → BSB.Builder
+mkXorDevShaderFrame195chars fs =
+  vecToRgb pixel
+  where
+    g = mkGlsl fs
+    p ∷ Vec2 = (g.fc * 2 - g.r) / vec g.r.y
     l ∷ Vec2 = abs (0.7 - vec (len2 p))
     v ∷ Vec2 = p * (1 - l) / 0.2
 
@@ -97,26 +132,20 @@ mkFancyShaderFrame195chars fs =
         reducer (o', v') i =
           let
             oN = o' + (sin (Vec4 w.x w.y w.y w.x) + 1) * (vec . abs) (w.x - w.y) * 0.2
-            w = v' + cos (Vec2 v'.y v'.x * vec i + Vec2 0 i + vec t) / vec i + 0.7
+            w = v' + cos (Vec2 v'.y v'.x * vec i + Vec2 0 i + vec g.t) / vec i + 0.7
           in
             (oN, w)
-        o = fst $ foldl' reducer (vec 0, v) [1..8]
+        o = fst $ List.foldl' reducer (vec 0, v) [1..8]
       in
         tanh (exp (vec p.y * Vec4 1 (-1) (-2) 0) * (exp . negate) (4 * vec l.x) / o)
 
 -- See https://twigl.app/?ol=true&ss=-OJyw73KFafCZX9RndXH
-mkFancyShaderFrame179chars ∷ FrameState → BSB.Builder
-mkFancyShaderFrame179chars fs =
-  rgb' pixel
+mkXorDevShaderFrame179chars ∷ FrameState → BSB.Builder
+mkXorDevShaderFrame179chars fs =
+  vecToRgb pixel
   where
-    rgb' (v4 ∷ Vec4) =
-      rgb (floor (v4.x * 255), floor (v4.y * 255), floor (v4.z * 255))
-
-    r = Vec2 (fromIntegral fs.w) (fromIntegral fs.h)
-    fc = Vec2 (fromIntegral fs.x) (fromIntegral (fs.h - 1 - fs.y))
-    t ∷ Float = fromIntegral fs.n / 60
-
-    p ∷ Vec2 = (fc * 2 - r) / vec r.y
+    g = mkGlsl fs
+    p ∷ Vec2 = (g.fc * 2 - g.r) / vec g.r.y
     l ∷ Vec2 = 4.0 - 4.0 * abs (0.7 - vec (len2 p))
     v ∷ Vec2 = p * l
 
@@ -125,23 +154,29 @@ mkFancyShaderFrame179chars fs =
         reducer (o', v') iy =
           let
             oN = o' + (sin (Vec4 w.x w.y w.y w.x) + 1) * (vec . abs) (w.x - w.y)
-            w = v' + cos (Vec2 v'.y v'.x * vec iy + Vec2 0 iy + vec t) / vec iy + 0.7
+            w = v' + cos (Vec2 v'.y v'.x * vec iy + Vec2 0 iy + vec g.t) / vec iy + 0.7
           in
             (oN, w)
-        o = fst $ foldl' reducer (vec 0, v) [1..8]
+        o = fst $ List.foldl' reducer (vec 0, v) [1..8]
       in
         tanh (5 * exp (vec l.x - 4 - vec p.y * Vec4 (-1) 1 2 0) / o)
 
-renderAnimation ∷ FilePath → (FrameState → BSB.Builder) → FrameState → IO ()
-renderAnimation outDir mkFrame fs =
-  forM_ [0..pred fs.framesTotal] $ \n' → do
+renderAnimationThread ∷ FilePath → (FrameState → BSB.Builder) → FrameState → IO ()
+renderAnimationThread outDir mkFrame fs = do
+  CM.forM_ [fs.framesFrom .. fs.framesTo] $ \n' → do
     renderFrame outDir mkFrame fs { n = n' }
-    when ((n' `mod` 10) == 0 || n' == fs.framesTotal) $
-      putStrLn $
-        "Frame " <> show n' <> " of " <> show fs.framesTotal <> " frames total"
-        <> " (" <> (show @Int . floor @Float) (fromIntegral (succ n') / fromIntegral fs.fps)
-        <> " second(s) of "
-        <> show fs.seconds <> " second(s) total rendered)"
+    CM.when ((n' `mod` logEveryNFrame) == 0 || n' == fs.framesTotal) $
+      putStrLn $ unwords
+        [ "Thread #" <> show fs.threadN, show (fs.framesFrom, fs.framesTo) <> ":"
+        , "Thread frame", show (n' - fs.framesFrom)
+        , "of", show (fs.framesTo - fs.framesFrom) <> ","
+        , "frame", show n', "of", show fs.framesTotal, "frames total"
+        , "(" <> (show @Int . ceiling @Float) (fromIntegral (succ n') / fromIntegral fs.fps)
+        , "second of", show fs.seconds, "second(s) total)"
+        ]
+  putStrLn $ "[OK] Thread #" <> show fs.threadN <> " is done"
+  where
+    logEveryNFrame = 10
 
 mkFrameFileName ∷ FrameState → FilePath
 mkFrameFileName fs = printf "frame-%09d.ppm" fs.n
@@ -157,10 +192,6 @@ renderFrame outDir mkFrame fs = do
         BSB.hPutBuilder fh $ mkFrame fs { x = x', y = y' }
   where
     fileName = outDir <> "/" <> mkFrameFileName fs
-
-rgb ∷ (Word8, Word8, Word8) → BSB.Builder
-rgb (r,g,b) = BSB.word8 r <> BSB.word8 g <> BSB.word8 b
-{-# INLINE rgb #-}
 
 data Vec2 = Vec2
   { x ∷ {-# UNPACK #-} !Float
@@ -376,6 +407,11 @@ data FrameState = FrameState
   , fps ∷ {-# UNPACK #-} !Word
   , seconds ∷ {-# UNPACK #-} !Word
   , framesTotal ∷ {-# UNPACK #-} !Word
+  , framesFrom ∷ {-# UNPACK #-} !Word
+  , framesTo ∷ {-# UNPACK #-} !Word
+
+  , threads ∷ {-# UNPACK #-} !Word
+  , threadN ∷ {-# UNPACK #-} !Word
 
   , x ∷ {-# UNPACK #-} !Word
   , y ∷ {-# UNPACK #-} !Word
@@ -392,12 +428,61 @@ len2 ∷ Dot v ⇒ v → Float
 len2 p = dot p p
 {-# INLINE len2 #-}
 
+-- len ∷ Dot v ⇒ v → Float
+-- len p = sqrt (len2 p)
+-- {-# INLINE len #-}
+
 class Vec v where
   vec ∷ Float → v
 instance Vec Float where
   vec = id
   {-# INLINE vec #-}
 
--- len ∷ Dot v ⇒ v → Float
--- len p = sqrt (len2 p)
--- {-# INLINE len #-}
+rgb ∷ (Word8, Word8, Word8) → BSB.Builder
+rgb (r,g,b) = BSB.word8 r <> BSB.word8 g <> BSB.word8 b
+{-# INLINE rgb #-}
+
+class VecToRgb v where
+  vecToRgb ∷ v → BSB.Builder
+instance VecToRgb Vec3 where
+  vecToRgb v =
+    rgb (floor (v.x * 255), floor (v.y * 255), floor (v.z * 255))
+  {-# INLINE vecToRgb #-}
+instance VecToRgb Vec4 where
+  vecToRgb v =
+    rgb (floor (v.x * 255), floor (v.y * 255), floor (v.z * 255))
+  {-# INLINE vecToRgb #-}
+
+data Glsl = Glsl
+  { r ∷ {-# UNPACK #-} !Vec2
+  , fc ∷ {-# UNPACK #-} !Vec2
+  , t ∷ {-# UNPACK #-} !Float
+  }
+  deriving (Eq, Show)
+
+mkGlsl ∷ FrameState → Glsl
+mkGlsl fs = Glsl
+  { r = Vec2 (fromIntegral fs.w) (fromIntegral fs.h)
+  , fc = Vec2 (fromIntegral fs.x) (fromIntegral (fs.h - 1 - fs.y))
+  , t = fromIntegral fs.n / fromIntegral fs.fps
+  }
+{-# INLINE mkGlsl #-}
+
+-- Example:
+--   splitRange (5,25) 4
+--   [(5,10),(11,15),(16,20),(21,25)]
+splitRange ∷ (Word, Word) → Word → [(Word, Word)]
+splitRange (from, to) amountOfRanges =
+  filter (uncurry (<=)) $ go from 0 amountOfRanges
+  where
+    total = to - from + 1
+    base = total `div` amountOfRanges
+    extra = total `mod` amountOfRanges
+    size k = base + (if k < extra then 1 else 0)
+
+    go _ _ 0 = []
+    go a k m =
+      (a, b) : go (b+1) (k+1) (m-1)
+        where
+          s = size k
+          b = a + s - 1
