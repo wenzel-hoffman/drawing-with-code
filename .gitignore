@@ -1,0 +1,6 @@
+*.ppm
+
+*.hi
+*.o
+
+generate
