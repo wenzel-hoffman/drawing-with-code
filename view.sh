@@ -68,7 +68,7 @@ case $MODE in
 		(
 			FFMPEG_CMD=(
 				ffmpeg
-				-framerate "$FPS"
+				-r "$FPS"
 				-i "$FRAME_FILE_PATTERN"
 				-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p
 				"$ANIMATION_FILE_PATH"

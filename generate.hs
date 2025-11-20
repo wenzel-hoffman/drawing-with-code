@@ -16,6 +16,7 @@ import qualified Data.List as List
 import Text.Read (readEither)
 import qualified Control.Concurrent.MVar as MVar
 import Control.Concurrent (forkIO)
+import Data.Function ((&))
 
 main ∷ IO ()
 main = do
@@ -81,6 +82,7 @@ main = do
 animations ∷ [(String, FrameState → BSB.Builder)]
 animations =
   [ ("mandelbrot-set", mkManderbrotSetFrame)
+  , ("puker", mkPukerFrame)
   , ("modified-xordev-shader", mkModifiedXorDevShaderFrame)
   , ("xordev-shader-179-version", mkXorDevShaderFrame179chars)
   , ("xordev-shader-195-version", mkXorDevShaderFrame195chars)
@@ -142,6 +144,34 @@ mkChessBoardFrame fs =
   if even (div (fs.x + fs.n) 60 + div (fs.y + fs.n) 60)
     then rgb (255,255,255)
     else rgb (0,0,0)
+
+-- See https://twigl.app/?ol=true&ss=-OeTznc5-TW9jrlEpJ6e
+mkPukerFrame ∷ FrameState → BSB.Builder
+mkPukerFrame fs =
+  vecToRgb pixel
+  where
+    g = mkGlsl fs
+    p ∷ Vec2 = (g.fc * zoomOut * 2 - g.r * zoomOut) / vec g.r.y
+    l ∷ Vec2 = vec $ tan 4.0 - 4.0 * abs (0.7 - atan (len2 p))
+    v ∷ Vec2 = p * l
+
+    zoomOut ∷ Vec2 = 2
+
+    pixel ∷ Vec4 =
+      let
+        reducer (o', v') iy =
+          let
+            oN = o' + (tanh (Vec4 w.x w.y w.y w.x) + 3) * (abs . sin . tan . vec) (w.x - w.y)
+            w
+              = v'
+              & (\x → x + (cos (sin (Vec2 x.y x.x) * vec iy + tan (Vec2 0 iy) + vec g.t) / vec iy + 5))
+              & (* 3.0)
+              & (\x → x + (sqrt . sqrt) (log2 x * (atan . log2) x))
+          in
+            (oN, w)
+        o = fst $ List.foldl' reducer (vec 0, v) [1..2]
+      in
+        atan (9 * exp (vec l.x - 3 - vec p.y * Vec4 (-3) 0 3 0) / sqrt o * 0.5)
 
 -- See https://twigl.app?ol=true&ss=-OeSzOONLcUV0fcPofxQ
 mkModifiedXorDevShaderFrame ∷ FrameState → BSB.Builder
@@ -215,7 +245,7 @@ renderAnimationThread ∷ FilePath → (FrameState → BSB.Builder) → FrameSta
 renderAnimationThread outDir mkFrame fs = do
   CM.forM_ [fs.framesFrom .. fs.framesTo] $ \n' → do
     renderFrame outDir mkFrame fs { n = n' }
-    CM.when ((n' `mod` logEveryNFrame) == 0 || n' == fs.framesTo) $
+    CM.when (((n' - fs.framesFrom) `mod` logEveryNFrame) == 0 || n' == fs.framesTo) $
       putStrLn $ unwords
         [ "Thread #" <> show fs.threadN, show (fs.framesFrom, fs.framesTo) <> ":"
         , "Thread frame", show (n' - fs.framesFrom)
@@ -242,6 +272,10 @@ renderFrame outDir mkFrame fs = do
         BSB.hPutBuilder fh $ mkFrame fs { x = x', y = y' }
   where
     fileName = outDir <> "/" <> mkFrameFileName fs
+
+log2 ∷ Floating a ⇒ a → a
+log2 = logBase 2
+{-# INLINE log2 #-}
 
 data Vec2 = Vec2
   { x ∷ {-# UNPACK #-} !Float
@@ -496,11 +530,19 @@ class VecToRgb v where
   vecToRgb ∷ v → BSB.Builder
 instance VecToRgb Vec3 where
   vecToRgb v =
-    rgb (floor (v.x * 255), floor (v.y * 255), floor (v.z * 255))
+    rgb
+      ( floor ((max 0 . min 1) v.x * 255)
+      , floor ((max 0 . min 1) v.y * 255)
+      , floor ((max 0 . min 1) v.z * 255)
+      )
   {-# INLINE vecToRgb #-}
 instance VecToRgb Vec4 where
   vecToRgb v =
-    rgb (floor (v.x * 255), floor (v.y * 255), floor (v.z * 255))
+    rgb
+      ( floor ((max 0 . min 1) v.x * 255)
+      , floor ((max 0 . min 1) v.y * 255)
+      , floor ((max 0 . min 1) v.z * 255)
+      )
   {-# INLINE vecToRgb #-}
 
 data Glsl = Glsl
