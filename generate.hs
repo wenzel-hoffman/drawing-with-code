@@ -37,11 +37,14 @@ main = do
 
   let framesTotal' = fps' * seconds'
 
+  putStrLn "Generating…"
+
   locks ←
     let frameRanges = splitRange (0, pred framesTotal') threads' in
     CM.forM (zip [1..] frameRanges) $ \(threadN', (framesFrom', framesTo')) → do
       lock <- MVar.newEmptyMVar @()
-      (lock <$) . forkIO $ do
+      let forkF = if threads' > 1 then CM.void . forkIO else id
+      (lock <$) . forkF $ do
         renderAnimationThread outDir animationF FrameState
           { w = w'
           , h = h'
@@ -60,9 +63,9 @@ main = do
 
           , n = minBound
           }
-        MVar.putMVar lock ()
+        CM.when (threads' > 1) $ MVar.putMVar lock ()
 
-  CM.forM_ locks MVar.takeMVar
+  CM.when (threads' > 1) $ CM.forM_ locks MVar.takeMVar
   putStrLn $ "[OK] All " <> show threads' <> " thread(s) are done"
 
   where
@@ -81,23 +84,20 @@ main = do
 
 animations ∷ [(String, FrameState → BSB.Builder)]
 animations =
-  [ ("mandelbrot-set", mkManderbrotSetFrame)
-  , ("puker", mkPukerFrame)
-  , ("modified-xordev-shader", mkModifiedXorDevShaderFrame)
-  , ("xordev-shader-179-version", mkXorDevShaderFrame179chars)
-  , ("xordev-shader-195-version", mkXorDevShaderFrame195chars)
+  [ ("mandel-puker", vecToRgb . mkMandelPukerPixel)
+  , ("mandelbrot-set", vecToRgb . mkManderbrotSetPixel defaultMandelbrotSetNavigation)
+  , ("puker", vecToRgb . (\x → x.pukerPixel) . mkPukerPixel)
+  , ("modified-xordev-shader", vecToRgb . mkModifiedXorDevShaderPixel)
+  , ("xordev-shader-179-version", vecToRgb . mkXorDevShaderPixel179chars)
+  , ("xordev-shader-195-version", vecToRgb . mkXorDevShaderPixel195chars)
   , ("chess-board", mkChessBoardFrame)
   ]
 
-mkManderbrotSetFrame ∷ FrameState → BSB.Builder
-mkManderbrotSetFrame fs =
-  vecToRgb pixel
+mkManderbrotSetPixel ∷ MandelbrotSetNavigation → FrameState → Vec3
+mkManderbrotSetPixel nav fs =
+  pixel
   where
     g = mkGlsl fs
-
-    -- For navigating around the set
-    nav = Vec2 0 0
-    zoom ∷ Float = 1
 
     pixel ∷ Vec3 =
       Vec3 (sqrt (fract x) / 3) (fract x) (sqrt (fract x))
@@ -111,8 +111,8 @@ mkManderbrotSetFrame fs =
         position ∷ Vec2
           = ((g.fc / correctedSize * 2) + centering - 1)
           * 2 -- Convert canvas to range from -2.0 to +2.0
-          / vec zoom
-          + nav
+          / vec nav.zoom
+          + nav.pos
 
         x = mandelbrotSet position
 
@@ -138,6 +138,19 @@ mkManderbrotSetFrame fs =
     fract x = x - fromIntegral (floor x ∷ Int)
     {-# INLINE fract #-}
 
+-- For navigating around the set
+data MandelbrotSetNavigation = MandelbrotSetNavigation
+  { pos ∷ Vec2
+  , zoom ∷ Float
+  }
+  deriving (Eq, Show)
+
+defaultMandelbrotSetNavigation ∷ MandelbrotSetNavigation
+defaultMandelbrotSetNavigation = MandelbrotSetNavigation
+  { pos = Vec2 0 0
+  , zoom = 1
+  }
+
 -- See https://www.youtube.com/watch?v=xNX9H_ZkfNE
 mkChessBoardFrame ∷ FrameState → BSB.Builder
 mkChessBoardFrame fs =
@@ -145,10 +158,45 @@ mkChessBoardFrame fs =
     then rgb (255,255,255)
     else rgb (0,0,0)
 
+-- A multiplication blend of “mandelbrot-set” and “puker”
+mkMandelPukerPixel ∷ FrameState → Vec4
+mkMandelPukerPixel fs =
+  pixel
+  where
+    mandelPixel ∷ Vec3 =
+      mkManderbrotSetPixel nav fs { n = 180 }
+      where
+        nav =
+          defaultMandelbrotSetNavigation & \x → x
+            { pos = x.pos { x = -0.5 }
+            , zoom = 3 * (1 - (pukerPixel'.pukerG.t * 0.07))
+            }
+
+    m = Vec4 (f mandelPixel.x) (f mandelPixel.y) (f mandelPixel.z) 1
+      where f = max 0 . min 1
+
+    pukerPixel' ∷ PukerPixel = mkPukerPixel fs
+
+    pixel ∷ Vec4 =
+      pukerPixel'.pukerPixel
+        & sqrt
+        & sin
+        & (** sqrt pukerPixel'.pukerO)
+        & (+ vec (pukerPixel'.pukerL.x * 0.5))
+        & (* m)
+        & (* 3)
+
 -- See https://twigl.app/?ol=true&ss=-OeTznc5-TW9jrlEpJ6e
-mkPukerFrame ∷ FrameState → BSB.Builder
-mkPukerFrame fs =
-  vecToRgb pixel
+mkPukerPixel ∷ FrameState → PukerPixel
+mkPukerPixel fs =
+  PukerPixel
+    { pukerPixel = pixel
+    , pukerG = g
+    , pukerP = p
+    , pukerL = l
+    , pukerV = v
+    , pukerO = o
+    }
   where
     g = mkGlsl fs
     p ∷ Vec2 = (g.fc * zoomOut * 2 - g.r * zoomOut) / vec g.r.y
@@ -158,6 +206,9 @@ mkPukerFrame fs =
     zoomOut ∷ Vec2 = 2
 
     pixel ∷ Vec4 =
+      atan (9 * exp (vec l.x - 3 - vec p.y * Vec4 (-3) 0 3 0) / sqrt o * 0.5)
+
+    o ∷ Vec4 =
       let
         reducer (o', v') iy =
           let
@@ -169,14 +220,23 @@ mkPukerFrame fs =
               & (\x → x + (sqrt . sqrt) (log2 x * (atan . log2) x))
           in
             (oN, w)
-        o = fst $ List.foldl' reducer (vec 0, v) [1..2]
       in
-        atan (9 * exp (vec l.x - 3 - vec p.y * Vec4 (-3) 0 3 0) / sqrt o * 0.5)
+        fst $ List.foldl' reducer (vec 0, v) [1..2]
+
+data PukerPixel = PukerPixel
+  { pukerPixel ∷ {-# UNPACK #-} !Vec4
+  , pukerG ∷ {-# UNPACK #-} !Glsl
+  , pukerP ∷ {-# UNPACK #-} !Vec2
+  , pukerL ∷ {-# UNPACK #-} !Vec2
+  , pukerV ∷ {-# UNPACK #-} !Vec2
+  , pukerO ∷ {-# UNPACK #-} !Vec4
+  }
+  deriving (Eq, Show)
 
 -- See https://twigl.app?ol=true&ss=-OeSzOONLcUV0fcPofxQ
-mkModifiedXorDevShaderFrame ∷ FrameState → BSB.Builder
-mkModifiedXorDevShaderFrame fs =
-  vecToRgb pixel
+mkModifiedXorDevShaderPixel ∷ FrameState → Vec4
+mkModifiedXorDevShaderPixel fs =
+  pixel
   where
     g = mkGlsl fs
     p ∷ Vec2 = (g.fc * zoomOut * 2 - g.r * zoomOut) / vec g.r.y
@@ -198,9 +258,9 @@ mkModifiedXorDevShaderFrame fs =
         tanh (9 * exp (vec l.x - 3 - vec p.y * Vec4 (-3) 0 3 0) / o)
 
 -- See https://x.com/XorDev/status/1894123951401378051
-mkXorDevShaderFrame195chars ∷ FrameState → BSB.Builder
-mkXorDevShaderFrame195chars fs =
-  vecToRgb pixel
+mkXorDevShaderPixel195chars ∷ FrameState → Vec4
+mkXorDevShaderPixel195chars fs =
+  pixel
   where
     g = mkGlsl fs
     p ∷ Vec2 = (g.fc * 2 - g.r) / vec g.r.y
@@ -220,9 +280,9 @@ mkXorDevShaderFrame195chars fs =
         tanh (exp (vec p.y * Vec4 1 (-1) (-2) 0) * (exp . negate) (4 * vec l.x) / o)
 
 -- See https://twigl.app/?ol=true&ss=-OJyw73KFafCZX9RndXH
-mkXorDevShaderFrame179chars ∷ FrameState → BSB.Builder
-mkXorDevShaderFrame179chars fs =
-  vecToRgb pixel
+mkXorDevShaderPixel179chars ∷ FrameState → Vec4
+mkXorDevShaderPixel179chars fs =
+  pixel
   where
     g = mkGlsl fs
     p ∷ Vec2 = (g.fc * 2 - g.r) / vec g.r.y
@@ -250,8 +310,9 @@ renderAnimationThread outDir mkFrame fs = do
         [ "Thread #" <> show fs.threadN, show (fs.framesFrom, fs.framesTo) <> ":"
         , "Thread frame", show (n' - fs.framesFrom)
         , "of", show (fs.framesTo - fs.framesFrom) <> ","
-        , "frame", show n', "of", show fs.framesTotal, "frames total"
-        , "(" <> (show @Int . ceiling @Float) (fromIntegral (succ n') / fromIntegral fs.fps)
+        , "frame", show n', "of", (show . pred) fs.framesTotal
+        , "(last frame, starting from 0,"
+        , "" <> (show @Int . ceiling @Float) (fromIntegral (succ n') / fromIntegral fs.fps)
         , "second of", show fs.seconds, "second(s) total)"
         ]
   putStrLn $ "[OK] Thread #" <> show fs.threadN <> " is done"

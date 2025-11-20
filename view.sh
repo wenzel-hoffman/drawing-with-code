@@ -43,23 +43,20 @@ else
 	exit 1
 fi
 
-(
-	set -o xtrace
-	ghc ./generate.hs -O2 -threaded -rtsopts -with-rtsopts=-N \
-		-odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
-)
-
 case $MODE in
 	picture)
 		(
 			set -o xtrace
-			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" 1 1 "$THREADS"
+			time ghc ./generate.hs -O2 -odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
+			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" 1 1 1
 			xdg-open "$FIRST_FRAME_FILE"
 		)
 		;;
 	video)
 		(
 			set -o xtrace
+			time ghc ./generate.hs -O2 -threaded -rtsopts -with-rtsopts=-N \
+				-odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
 			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" "$FPS" "$DURATION" "$THREADS"
 		)
 		echo -n 'Raw frames size: '
@@ -76,7 +73,7 @@ case $MODE in
 			set -o xtrace
 			"${FFMPEG_CMD[@]}"
 			cleanup
-			mpv -- "$ANIMATION_FILE_PATH"
+			mpv --video-unscaled=yes --window-scale=1.0 -- "$ANIMATION_FILE_PATH"
 		)
 		;;
 	*)
