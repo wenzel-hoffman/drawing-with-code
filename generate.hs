@@ -80,11 +80,61 @@ main = do
 
 animations ∷ [(String, FrameState → BSB.Builder)]
 animations =
-  [ ("modified-xordev-shader", mkModifiedXorDevShaderFrame)
+  [ ("mandelbrot-set", mkManderbrotSetFrame)
+  , ("modified-xordev-shader", mkModifiedXorDevShaderFrame)
   , ("xordev-shader-179-version", mkXorDevShaderFrame179chars)
   , ("xordev-shader-195-version", mkXorDevShaderFrame195chars)
   , ("chess-board", mkChessBoardFrame)
   ]
+
+mkManderbrotSetFrame ∷ FrameState → BSB.Builder
+mkManderbrotSetFrame fs =
+  vecToRgb pixel
+  where
+    g = mkGlsl fs
+
+    -- For navigating around the set
+    nav = Vec2 0 0
+    zoom ∷ Float = 1
+
+    pixel ∷ Vec3 =
+      Vec3 (sqrt (fract x) / 3) (fract x) (sqrt (fract x))
+      where
+        rx ∷ Float = vec $ g.r.x / g.r.y
+        ry ∷ Float = vec $ g.r.y / g.r.x
+
+        correctedSize = Vec2 (g.r.x * min ry 1) (g.r.y * min rx 1)
+        centering = Vec2 (1 - max rx 1) (1 - max ry 1)
+
+        position ∷ Vec2
+          = ((g.fc / correctedSize * 2) + centering - 1)
+          * 2 -- Convert canvas to range from -2.0 to +2.0
+          / vec zoom
+          + nav
+
+        x = mandelbrotSet position
+
+    mandelbrotSet (point ∷ Vec2) =
+      go 0 point
+      where
+        threshold ∷ Float = 16
+        detalizationSpeed ∷ Float = 30 -- Hz or FPS (added iterations per second)
+        maxIterations ∷ Int = 1000
+        limit ∷ Int = min (round (g.t * detalizationSpeed)) maxIterations
+
+        go (i ∷ Int) (xy ∷ Vec2)
+          | i >= limit = 1 ∷ Float
+          | otherwise =
+              let
+                v = Vec2 (xy.x * xy.x - xy.y * xy.y) (2 * xy.x * xy.y)
+              in
+                if abs (v.x + v.y) > threshold
+                  then fromIntegral i / fromIntegral limit
+                  else go (succ i) (v + point)
+
+    fract ∷ Float → Float
+    fract x = x - fromIntegral (floor x ∷ Int)
+    {-# INLINE fract #-}
 
 -- See https://www.youtube.com/watch?v=xNX9H_ZkfNE
 mkChessBoardFrame ∷ FrameState → BSB.Builder
@@ -105,7 +155,7 @@ mkModifiedXorDevShaderFrame fs =
 
     zoomOut ∷ Vec2 = 1.6
 
-    pixel =
+    pixel ∷ Vec4 =
       let
         reducer (o', v') iy =
           let
@@ -127,7 +177,7 @@ mkXorDevShaderFrame195chars fs =
     l ∷ Vec2 = abs (0.7 - vec (len2 p))
     v ∷ Vec2 = p * (1 - l) / 0.2
 
-    pixel =
+    pixel ∷ Vec4 =
       let
         reducer (o', v') i =
           let
@@ -149,7 +199,7 @@ mkXorDevShaderFrame179chars fs =
     l ∷ Vec2 = 4.0 - 4.0 * abs (0.7 - vec (len2 p))
     v ∷ Vec2 = p * l
 
-    pixel =
+    pixel ∷ Vec4 =
       let
         reducer (o', v') iy =
           let
