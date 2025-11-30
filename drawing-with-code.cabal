@@ -1,0 +1,72 @@
+cabal-version: 3.0
+name: drawing-with-code
+version: 0.0.0.0
+-- synopsis:
+-- description:
+license: AGPL-3.0-or-later
+license-file: LICENSE
+author: Wenzel Hoffman
+maintainer: wenzel.hoffman@gmail.com
+-- copyright:
+category: Graphics
+build-type: Simple
+extra-doc-files: CHANGELOG.md
+-- extra-source-files:
+
+common exe
+  ghc-options: -Wall -Wno-ambiguous-fields -threaded -rtsopts -with-rtsopts=-N
+  default-language: GHC2021
+  hs-source-dirs: app
+  build-depends:
+    , base ^>=4.19.2.0
+    , drawing-with-code
+
+library
+  ghc-options: -Wall -Wno-ambiguous-fields
+  default-language: GHC2021
+  hs-source-dirs: src
+  build-depends:
+    , base ^>=4.19.2.0
+    , bytestring
+    , text
+  exposed-modules:
+    DrawingWithCode.Vec
+    DrawingWithCode.FrameState
+    DrawingWithCode.Math
+    DrawingWithCode.Ranges
+    DrawingWithCode.Render
+    DrawingWithCode.ArgsParse
+    DrawingWithCode.Animation
+    DrawingWithCode.Animations.MandelbrotSet
+    DrawingWithCode.Animations.ChessBoard
+    DrawingWithCode.Animations.Puker
+    DrawingWithCode.Animations.MandelPuker
+    DrawingWithCode.Animations.XorDevShader
+
+executable modified-xordev-shader
+  import: exe
+  main-is: ModifiedXorDevShader.hs
+
+executable xordev-shader-179-version
+  import: exe
+  main-is: XorDevShader179Chars.hs
+
+executable xordev-shader-195-version
+  import: exe
+  main-is: XorDevShader195Chars.hs
+
+executable chess-board
+  import: exe
+  main-is: ChessBoard.hs
+
+executable puker
+  import: exe
+  main-is: Puker.hs
+
+executable mandelbrot-set
+  import: exe
+  main-is: MandelbrotSet.hs
+
+executable mandel-puker
+  import: exe
+  main-is: MandelPuker.hs

@@ -2,8 +2,8 @@
 set -o errexit || exit; set -o errtrace; set -o nounset; set -o pipefail
 
 # Guard dependencies
->/dev/null type dirname mktemp rm du cut tail time nproc
->/dev/null type ghc runhaskell ffmpeg mpv xdg-open
+>/dev/null type dirname mktemp mkdir rm du cut tail time nproc
+>/dev/null type ghc runhaskell ffmpeg mpv feh
 
 SCRIPT_DIR=$(dirname -- "${BASH_SOURCE[0]}")
 cd -- "$SCRIPT_DIR"
@@ -18,7 +18,6 @@ cleanup() (
 
 trap cleanup EXIT
 
-GENERATE_BIN=$TMP_DIR/generate
 FRAME_FILE_PATTERN=$TMP_DIR/frame-%09d.ppm
 # shellcheck disable=SC2059
 FIRST_FRAME_FILE=$(printf "$FRAME_FILE_PATTERN" 0)
@@ -31,6 +30,8 @@ CORES=$(nproc --all)
 : "${FPS:=60}"
 : "${DURATION:=10}" # In seconds
 : "${THREADS:=$CORES}"
+
+: "${RENDERS_DIR:=renders}"
 
 MODE=
 if (( $# == 0 )) || ( (( $# == 1 )) && [[ $1 == video ]] ); then
@@ -47,21 +48,21 @@ case $MODE in
 	picture)
 		(
 			set -o xtrace
-			time ghc ./generate.hs -O2 -odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
-			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" 1 1 1
-			xdg-open "$FIRST_FRAME_FILE"
+			time cabal build -- "$ANIMATION"
+			time cabal run -- "$ANIMATION" "$TMP_DIR" "$WIDTH" "$HEIGHT" 1 1 1
+			feh --scale-down -- "$FIRST_FRAME_FILE"
 		)
 		;;
 	video)
 		(
 			set -o xtrace
-			time ghc ./generate.hs -O2 -threaded -rtsopts -with-rtsopts=-N \
-				-odir "$TMP_DIR" -hidir "$TMP_DIR" -o "$GENERATE_BIN"
-			time "$GENERATE_BIN" "$TMP_DIR" "$ANIMATION" "$WIDTH" "$HEIGHT" "$FPS" "$DURATION" "$THREADS"
+			time cabal build -- "$ANIMATION"
+			time cabal run -- "$ANIMATION" "$TMP_DIR" "$WIDTH" "$HEIGHT" "$FPS" "$DURATION" "$THREADS"
 		)
 		echo -n 'Raw frames size: '
 		du -ch "$TMP_DIR"/*.ppm | tail -n1 | cut -d $'\t' -f 1 | cut -d ' ' -f 1
-		ANIMATION_FILE_PATH=${ANIMATION}-w-${WIDTH}-h-${HEIGHT}-fps-${FPS}-dur-${DURATION}.mp4
+		mkdir -p -- "$RENDERS_DIR"
+		ANIMATION_FILE_PATH=${RENDERS_DIR}/${ANIMATION}-w-${WIDTH}-h-${HEIGHT}-fps-${FPS}-dur-${DURATION}.mp4
 		(
 			FFMPEG_CMD=(
 				ffmpeg
