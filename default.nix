@@ -45,6 +45,7 @@ let
       pkgs.ffmpeg # For rendering videos from generated *.ppm frame files
       pkgs.mpv # For previewing rendered videos
       pkgs.feh # For previewing frames
+      pkgs.imagemagick # For converting image formats
 
       pkgs.coreutils
     ];

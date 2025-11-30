@@ -3,7 +3,7 @@ set -o errexit || exit; set -o errtrace; set -o nounset; set -o pipefail
 
 # Guard dependencies
 >/dev/null type dirname mktemp mkdir rm du cut tail time nproc
->/dev/null type cabal ffmpeg mpv feh
+>/dev/null type cabal ffmpeg mpv feh magick
 
 SCRIPT_DIR=$(dirname -- "${BASH_SOURCE[0]}")
 cd -- "$SCRIPT_DIR"
@@ -33,24 +33,61 @@ CORES=$(nproc --all)
 
 : "${RENDERS_DIR:=renders}"
 
+show-usage() {
+	set -o errexit || exit; set -o errtrace; set -o nounset; set -o pipefail
+	printf 'Usage: %s (video|picture) (save)\n' "$0"
+}
+
 MODE=
-if (( $# == 0 )) || ( (( $# == 1 )) && [[ $1 == video ]] ); then
+if (( $# == 0 )) || ( (( $# >= 1 )) && [[ $1 == video ]] ); then
 	MODE=video
-elif (( $# == 1 )) && [[ $1 == picture ]]; then
+	if (( $# >= 1 )); then shift; fi
+elif (( $# >= 1 )) && [[ $1 == picture ]]; then
 	MODE=picture
+	shift
 else
 	>&2 printf 'Unexpected argument: “%s”\n' "$@"
-	>&2 printf '\nUsage: %s (video|picture)\n' "$0"
+	>&2 echo
+	>&2 show-usgae
+	exit 1
+fi
+
+SAVE=false
+if (( $# == 1 )) && [[ $1 == save ]]; then
+	SAVE=true
+elif (( $# >= 1 )); then
+	>&2 printf 'Unexpected argument: “%s”\n' "$@"
+	>&2 echo
+	>&2 show-usgae
 	exit 1
 fi
 
 case $MODE in
 	picture)
 		(
-			set -o xtrace
-			time cabal build -- "$ANIMATION"
-			time cabal run -- "$ANIMATION" "$TMP_DIR" "$WIDTH" "$HEIGHT" 1 1 1
-			feh --scale-down -- "$FIRST_FRAME_FILE"
+			(
+				set -o xtrace
+				time cabal build -- "$ANIMATION"
+				time cabal run -- "$ANIMATION" "$TMP_DIR" "$WIDTH" "$HEIGHT" 1 1 1
+			)
+			if "$SAVE"; then
+				(
+					mkdir -p -- "$RENDERS_DIR"
+					PNG_FILE=${RENDERS_DIR}/${ANIMATION}-w-${WIDTH}-h-${HEIGHT}.png
+					MAGICK_CMD=(
+						magick "$FIRST_FRAME_FILE"
+						-define png:compression-level=9
+						-define png:compression-strategy=2
+						-define png:exclude-chunk=all
+						"$PNG_FILE"
+					)
+					set -o xtrace
+					"${MAGICK_CMD[@]}"
+					feh --scale-down -- "$PNG_FILE"
+				)
+			else
+				(set -o xtrace; feh --scale-down -- "$FIRST_FRAME_FILE")
+			fi
 		)
 		;;
 	video)
