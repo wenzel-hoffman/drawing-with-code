@@ -3,7 +3,7 @@ set -o errexit || exit; set -o errtrace; set -o nounset; set -o pipefail
 
 # Guard dependencies
 >/dev/null type dirname mktemp mkdir rm du cut tail time nproc
->/dev/null type ghc runhaskell ffmpeg mpv feh
+>/dev/null type cabal ffmpeg mpv feh
 
 SCRIPT_DIR=$(dirname -- "${BASH_SOURCE[0]}")
 cd -- "$SCRIPT_DIR"
