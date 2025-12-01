@@ -21,6 +21,8 @@ file for all available “animations”):
 ANIMATION=modified-xordev-shader ./view.sh picture save
 ```
 
+![modified-xordev-shader single frame render](https://raw.githubusercontent.com/wenzel-hoffman/drawing-with-code/7a02e6ea3950dececb06d505383de85526a1db52/renders/modified-xordev-shader-w-600-h-600.png)
+
 Or render and preview 3 seconds of the animation video:
 
 ``` sh
@@ -33,6 +35,10 @@ You can also render GIF instead of MP4:
 ANIMATION=modified-xordev-shader DURATION=3 VIDEO_FORMAT=gif ./view.sh video
 ```
 
+![modified-xordev-shader 3 seconds GIF render](https://github.com/wenzel-hoffman/drawing-with-code/blob/7a02e6ea3950dececb06d505383de85526a1db52/renders/modified-xordev-shader-w-600-h-600-fps-60-dur-3.gif?raw=true)
+
 ``` sh
 ANIMATION=puker DURATION=3 VIDEO_FORMAT=gif ./view.sh video
 ```
+
+![puker 3 seconds GIF render](https://github.com/wenzel-hoffman/drawing-with-code/blob/7a02e6ea3950dececb06d505383de85526a1db52/renders/puker-w-600-h-600-fps-60-dur-3.gif?raw=true)
