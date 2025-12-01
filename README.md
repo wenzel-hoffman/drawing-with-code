@@ -42,3 +42,21 @@ ANIMATION=puker DURATION=3 VIDEO_FORMAT=gif ./view.sh video
 ```
 
 ![puker 3 seconds GIF render](https://github.com/wenzel-hoffman/drawing-with-code/blob/7a02e6ea3950dececb06d505383de85526a1db52/renders/puker-w-600-h-600-fps-60-dur-3.gif?raw=true)
+
+``` sh
+ANIMATION=mandelbrot-set DURATION=3 VIDEO_FORMAT=gif ./view.sh video
+```
+
+![mandelbrot-set 3 seconds GIF render](https://raw.githubusercontent.com/wenzel-hoffman/drawing-with-code/3d1f72d9f2a335069dab1fcb30345f411247b1ad/renders/mandelbrot-set-w-600-h-600-fps-60-dur-3.gif)
+
+``` sh
+ANIMATION=mandel-puker DURATION=3 VIDEO_FORMAT=gif ./view.sh video
+```
+
+![mandel-puker 3 seconds GIF render](https://raw.githubusercontent.com/wenzel-hoffman/drawing-with-code/3d1f72d9f2a335069dab1fcb30345f411247b1ad/renders/mandel-puker-w-600-h-600-fps-60-dur-3.gif)
+
+``` sh
+ANIMATION=chess-board DURATION=3 VIDEO_FORMAT=gif ./view.sh video
+```
+
+![chess-board 3 seconds GIF render](https://raw.githubusercontent.com/wenzel-hoffman/drawing-with-code/3d1f72d9f2a335069dab1fcb30345f411247b1ad/renders/chess-board-w-600-h-600-fps-60-dur-3.gif)
