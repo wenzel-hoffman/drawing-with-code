@@ -48,7 +48,7 @@ elif (( $# >= 1 )) && [[ $1 == picture ]]; then
 else
 	>&2 printf 'Unexpected argument: “%s”\n' "$@"
 	>&2 echo
-	>&2 show-usgae
+	>&2 show-usage
 	exit 1
 fi
 
@@ -58,7 +58,7 @@ if (( $# == 1 )) && [[ $1 == save ]]; then
 elif (( $# >= 1 )); then
 	>&2 printf 'Unexpected argument: “%s”\n' "$@"
 	>&2 echo
-	>&2 show-usgae
+	>&2 show-usage
 	exit 1
 fi
 
