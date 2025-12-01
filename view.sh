@@ -33,6 +33,8 @@ CORES=$(nproc --all)
 
 : "${RENDERS_DIR:=renders}"
 
+: "${VIDEO_FORMAT:=mp4}"
+
 show-usage() {
 	set -o errexit || exit; set -o errtrace; set -o nounset; set -o pipefail
 	printf 'Usage: %s (video|picture) (save)\n' "$0"
@@ -99,19 +101,40 @@ case $MODE in
 		echo -n 'Raw frames size: '
 		du -ch "$TMP_DIR"/*.ppm | tail -n1 | cut -d $'\t' -f 1 | cut -d ' ' -f 1
 		mkdir -p -- "$RENDERS_DIR"
-		ANIMATION_FILE_PATH=${RENDERS_DIR}/${ANIMATION}-w-${WIDTH}-h-${HEIGHT}-fps-${FPS}-dur-${DURATION}.mp4
+		animation_file_path=${RENDERS_DIR}/${ANIMATION}-w-${WIDTH}-h-${HEIGHT}-fps-${FPS}-dur-${DURATION}.mp4
 		(
 			FFMPEG_CMD=(
 				ffmpeg
 				-r "$FPS"
 				-i "$FRAME_FILE_PATTERN"
-				-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p
-				"$ANIMATION_FILE_PATH"
 			)
-			set -o xtrace
-			"${FFMPEG_CMD[@]}"
+			if [[ $VIDEO_FORMAT == mp4 ]]; then
+				FFMPEG_CMD+=(
+					-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p
+					"$animation_file_path"
+				)
+			elif [[ $VIDEO_FORMAT == gif ]]; then
+				PALETTE_FILE="$TMP_DIR/palette.png"
+				PALETTEGEN_FFMPEG_CMD=(
+					"${FFMPEG_CMD[@]}"
+					-vf "palettegen"
+					-y "$PALETTE_FILE"
+				)
+				(set -o xtrace; "${PALETTEGEN_FFMPEG_CMD[@]}")
+				animation_file_path=${animation_file_path%.mp4}.gif
+				FFMPEG_CMD+=(
+					-i "$PALETTE_FILE"
+					-lavfi "fps=$FPS,paletteuse=dither=bayer:bayer_scale=5"
+					-loop 0 # Loop the GIF
+					"$animation_file_path"
+				)
+			else
+				>&2 printf 'Unexpected VIDEO_FORMAT value: “%s”\n' "$VIDEO_FORMAT"
+				exit 1
+			fi
+			(set -o xtrace; "${FFMPEG_CMD[@]}")
 			cleanup
-			mpv --video-unscaled=yes --window-scale=1.0 -- "$ANIMATION_FILE_PATH"
+			(set -o xtrace; mpv --loop --video-unscaled=yes --window-scale=1.0 -- "$animation_file_path")
 		)
 		;;
 	*)
